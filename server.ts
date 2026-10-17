@@ -36,13 +36,25 @@ function logEvent(type: string, details: any) {
 // Track used signatures to prevent Replay Attacks
 const usedSignatures = new Set<string>();
 
-// Protected Ephemeral Secret Payload
-const DEAD_DROP_VAULT = {
-  id: "DROP-9942-X",
-  classification: "TOP-SECRET",
-  payload: "CONFIDENTIAL: Internal API Gateway key `sk_live_9921_solana_agent` retrieved at runtime.",
-  expiresIn: "30 seconds",
-};
+// Dynamic High-Value Payload Generator
+function getDeadDropVault() {
+  return {
+    id: `DROP-${Math.floor(1000 + Math.random() * 9000)}-X`,
+    classification: "CONFIDENTIAL_ONCHAIN_INTEL",
+    timestamp: new Date().toISOString(),
+    networkMetrics: {
+      targetCluster: "solana-devnet",
+      tps: Math.floor(2800 + Math.random() * 400),
+      solUsdPrice: (142.50 + Math.random() * 2.5).toFixed(2),
+      liquidityDepthUsd: "$1,240,000",
+    },
+    agentCredentials: {
+      apiKey: `sk_live_${Math.random().toString(36).substring(2, 15)}`,
+      endpoint: "https://api.deaddrop.network/v1/stream",
+      ttl: "60 seconds",
+    },
+  };
+}
 
 // Main HTTP 402 Protected Endpoint
 app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
@@ -112,11 +124,12 @@ app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
     // Mark signature as used to block subsequent replay attempts
     usedSignatures.add(paymentSignature);
 
-    logEvent("PAYLOAD_UNLOCKED", { dropId: DEAD_DROP_VAULT.id, recipient: SERVER_PUBKEY, signature: paymentSignature });
+    const unlockedPayload = getDeadDropVault();
+    logEvent("PAYLOAD_UNLOCKED", { dropId: unlockedPayload.id, recipient: SERVER_PUBKEY, signature: paymentSignature });
     return res.status(200).json({
       status: "UNLOCKED",
       protocol: "x402",
-      data: DEAD_DROP_VAULT,
+      data: unlockedPayload,
     });
   } catch (err: any) {
     logEvent("VERIFY_ERROR", { message: err.message });
