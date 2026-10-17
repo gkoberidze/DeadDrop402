@@ -1,8 +1,18 @@
-import { Connection, Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  SystemProgram,
+  sendAndConfirmTransaction,
+} from "@solana/web3.js";
 import fs from "node:fs";
 import process from "node:process";
 
 const connection = new Connection("https://api.devnet.solana.com", "confirmed");
+const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+const replayDemoEnabled = process.argv.includes("--replay");
 
 // Load Agent Wallet
 if (!fs.existsSync("agent-key.json")) {
@@ -17,7 +27,6 @@ const agentKeypair = Keypair.fromSecretKey(Uint8Array.from(secret));
 const AGENT_CONFIG = {
   name: "BioByte-Autonomous-Agent-01",
   maxBudgetLamports: 2000000, // Maximum budget: 0.002 SOL
-  minRequiredTpsThreshold: 2000,
 };
 
 async function runAutonomousAgent() {
@@ -42,6 +51,7 @@ async function runAutonomousAgent() {
       console.log(`   └─ Network: ${paymentDetails.network}`);
       console.log(`   └─ Recipient: ${paymentDetails.recipient}`);
       console.log(`   └─ Price: ${paymentDetails.amountLamports} Lamports (${paymentDetails.amountLamports / 1e9} SOL)`);
+      console.log(`   └─ Quote memo: ${paymentDetails.memo}`);
     } else {
       console.log("Unexpected response status:", res.status);
       return;
@@ -74,7 +84,12 @@ async function runAutonomousAgent() {
       fromPubkey: agentKeypair.publicKey,
       toPubkey: recipientPubkey,
       lamports: requestedPrice,
-    })
+    }),
+    new TransactionInstruction({
+      keys: [],
+      programId: MEMO_PROGRAM_ID,
+      data: Buffer.from(paymentDetails.memo, "utf8"),
+    }),
   );
 
   console.log("🚀 Broadcasting transaction to Solana Devnet...");
@@ -91,10 +106,28 @@ async function runAutonomousAgent() {
       },
     });
 
-    const unlockedData = await res.json();
+    const responseBody: unknown = await res.json();
+    if (!res.ok) {
+      console.error(`❌ Unlock request failed (HTTP ${res.status}):`, responseBody);
+      return;
+    }
+
     console.log("\n✨ ================= DATA UNLOCKED ================= ✨");
-    console.dir(unlockedData, { depth: null, colors: true });
+    console.dir(responseBody, { depth: null, colors: true });
     console.log("========================================================\n");
+
+    if (replayDemoEnabled) {
+      console.log("🔁 [REPLAY DEMO] Resubmitting the same payment signature...");
+      const replayResponse = await fetch(targetUrl, {
+        headers: { "payment-signature": signature },
+      });
+      const replayBody: unknown = await replayResponse.json();
+      if (!replayResponse.ok) {
+        console.log(`✅ Server rejected the replay (HTTP ${replayResponse.status}):`, replayBody);
+      } else {
+        console.error("❌ Replay was unexpectedly accepted by the server.");
+      }
+    }
   } catch (error: any) {
     console.error("❌ Settlement Error:", error.message);
   }

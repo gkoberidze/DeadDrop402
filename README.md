@@ -2,14 +2,14 @@
 
 ### Data access for autonomous agents—paid for on demand.
 
-**DeadDrop402** is an autonomous machine-to-machine (M2M) data exchange prototype for Solana. It uses the HTTP `402 Payment Required` response to tell an AI agent what a protected resource costs, then unlocks the payload after the agent makes a micropayment on-chain.
+**DeadDrop402** is an autonomous machine-to-machine (M2M) data exchange prototype for Solana. It uses HTTP `402 Payment Required` to tell an AI agent what a protected resource costs, then unlocks the payload after the agent makes a verifiable, quote-bound micropayment on-chain.
 
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Solana](https://img.shields.io/badge/Solana-Devnet-9945FF?logo=solana&logoColor=white)](https://solana.com/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-ESM-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-UI-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 
-> **Hackathon project / Devnet demo.** This repository demonstrates a payment-gated API flow. It is not production-ready payment infrastructure.
+> **Hackathon project / Devnet demo.** The implementation demonstrates a payment-gated API flow. It is not audited or intended for production payments.
 
 ## The problem
 
@@ -17,46 +17,50 @@ AI agents can request APIs, compare data, and take action—but conventional onl
 
 ## The solution
 
-DeadDrop402 combines an HTTP payment challenge with a Solana Devnet transfer. A server responds to an unpaid request with the payment details; the agent pays from its wallet and retries with the transaction signature.
+DeadDrop402 combines an HTTP payment challenge with a native SOL transfer on Solana Devnet. An unpaid request receives a quote with a unique memo nonce. The agent makes a transfer containing that nonce and retries with its transaction signature. The server checks the transaction on-chain before returning the resource.
 
 ### The 4-step exchange
 
 1. **Request** — The agent requests a protected resource.
-2. **HTTP 402 intercept** — The server returns `402 Payment Required` and a payment quote, including the recipient, asset, network, and amount.
-3. **On-chain micropayment** — The agent signs and submits a SOL transfer on Solana Devnet.
-4. **Payload unlock** — The agent retries with the transaction signature in the `payment-signature` header; the server looks up the transaction and returns the protected payload.
+2. **HTTP 402 intercept** — The server returns `402 Payment Required` with recipient, asset, network, amount, and a short-lived quote memo.
+3. **On-chain micropayment** — The agent submits a SOL transfer and Memo program instruction on Solana Devnet.
+4. **Payload unlock** — The agent retries with the transaction signature in the `payment-signature` header. The server checks transaction status and age, validates the transfer and memo, and returns the payload if valid.
 
-In the current demo, the quoted price is **0.001 SOL** (`1,000,000` lamports).
+The current quote is **0.001 SOL** (`1,000,000` lamports) and expires after five minutes.
 
 ## Features
 
-- **Autonomous M2M purchasing** — The example agent handles the challenge, payment, and retry without a human checkout.
-- **Low-friction payments** — Pay per request with a native SOL transfer instead of a card-based flow.
-- **Live dashboard** — View the recipient wallet and recent protocol events at `http://localhost:4020`.
-- **Idempotency groundwork** — Solana transaction signatures provide stable identifiers for a future replay-safe settlement flow. **The current demo does not persist processed signatures or prevent duplicate unlocks.**
-- **Devnet-first** — Test with Devnet SOL; no mainnet funds are required.
+- **Autonomous M2M purchasing** — The example agent handles the 402 challenge, payment, and retry without a human checkout.
+- **On-chain payment verification** — Checks transaction success, a system transfer to the configured server wallet, the required amount, and the recipient balance increase.
+- **Quote binding** — A random, expiring memo nonce binds the payment to the issued quote and is consumed after successful unlock.
+- **Replay protection** — Signatures are reserved before asynchronous verification, rejected if already in use, and retained after successful unlock. Failed verification releases the reservation for a legitimate retry.
+- **Fresh payments** — Transactions older than five minutes are rejected.
+- **Live dashboard** — Displays the server wallet and recent protocol events at `http://localhost:4020`.
+- **XSS-safe log rendering** — Dashboard event values are assigned through DOM `textContent`, not inserted as HTML.
+- **Live payload metrics** — SOL/USD is fetched from CoinGecko with a three-second timeout and fallback; TPS is calculated from Solana Devnet performance samples.
+- **No fabricated liquidity metric** — Liquidity depth is explicitly reported as unavailable until a real data source is integrated.
 
 ## Architecture
 
 ```text
-┌────────────────────┐      GET protected data       ┌──────────────────────┐
-│                    │ ─────────────────────────────> │                      │
-│   AI Agent Client  │ <───────────────────────────── │   DeadDrop Server    │
-│                    │       402 + payment quote      │  Express / HTTP API  │
-└─────────┬──────────┘                                └──────────┬───────────┘
-          │                                                      │
-          │ SOL transfer on Devnet                               │ Look up
-          │                                                      │ transaction
-          ▼                                                      ▼
+┌────────────────────┐    request / 402 quote     ┌──────────────────────┐
+│                    │ ─────────────────────────> │                      │
+│   AI Agent Client  │ <───────────────────────── │   DeadDrop Server    │
+│                    │                            │   Express / API      │
+└─────────┬──────────┘                            └──────────┬───────────┘
+          │                                                   │
+          │ SOL transfer + quote memo                        │ Verify signature,
+          │                                                   │ transfer, memo
+          ▼                                                   ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                              Solana Devnet                               │
 └──────────────────────────────────────────────────────────────────────────┘
 
 Agent retries with `payment-signature` ───────────────────────> Server
 Agent receives protected payload       <─────────────────────── Server
-```
 
-The dashboard is served by the DeadDrop server and polls its in-memory event feed once per second.
+Dashboard ── polls `/api/v1/logs` every second ────────────────> Server
+```
 
 ## Quickstart
 
@@ -64,57 +68,51 @@ The dashboard is served by the DeadDrop server and polls its in-memory event fee
 
 - [Node.js](https://nodejs.org/) **v18 or later**
 - npm (included with Node.js)
-- A network connection to Solana Devnet
+- A connection to Solana Devnet
 
-### 1. Install dependencies
-
-From the repository root:
+### Install dependencies
 
 ```bash
 npm install
 ```
 
-### 2. Generate demo wallets
-
-Create a server recipient keypair and an agent payer keypair:
+### Generate demo wallets
 
 ```bash
 npm run setup
 ```
 
-The setup script writes `server-key.json` and `agent-key.json` in the project root and prints the agent's public address. Request **Devnet SOL** for that agent address from the [Solana Faucet](https://faucet.solana.com/). The agent needs enough SOL for the **0.001 SOL payment plus transaction fees**.
+This creates `server-key.json` and `agent-key.json` in the project root and prints the agent's public address. Request **Devnet SOL** for that address from the [Solana Faucet](https://faucet.solana.com/). The agent needs enough for the 0.001 SOL payment and transaction fees.
 
-> **Wallet safety:** These JSON files contain secret keys in plaintext. Keep them local, never share them, and do not commit them to source control. Use throwaway wallets with no real funds.
+> **Wallet safety:** These files contain private keys in plaintext. Keep them local, do not share or commit them, and use throwaway wallets with no real funds.
 
-### 3. Start the server
+## Demo
 
-In one terminal:
+Run the server in one terminal:
 
 ```bash
 npm run server
 ```
 
-The API and dashboard are available at `http://localhost:4020`.
-
-### 4. Run the AI agent client
-
-In a second terminal, from the project root:
+Then, from the project root, run the agent in another terminal:
 
 ```bash
 npm run client
 ```
 
-The agent requests the protected endpoint, submits the Devnet payment, then retries with the resulting transaction signature.
+To demonstrate replay protection after a successful unlock:
 
-### 5. Watch the dashboard
+```bash
+npm run client -- --replay
+```
 
-Open **[http://localhost:4020](http://localhost:4020)** to see the server wallet and live protocol events.
+The client resubmits the same signature and reports the server's rejection. Open **[http://localhost:4020](http://localhost:4020)** to watch the event dashboard.
 
 ## API reference
 
 ### `GET /api/v1/deaddrop/intel`
 
-Without a `payment-signature` header, the endpoint responds with HTTP `402` and a payment quote:
+Without a `payment-signature` header, the endpoint returns HTTP `402` with a payment quote:
 
 ```json
 {
@@ -125,12 +123,13 @@ Without a `payment-signature` header, the endpoint responds with HTTP `402` and 
     "network": "solana-devnet",
     "recipient": "<server-wallet-public-key>",
     "amountLamports": 1000000,
-    "asset": "SOL"
+    "asset": "SOL",
+    "memo": "<unique-quote-nonce>"
   }
 }
 ```
 
-After payment, retry the same endpoint with the transaction signature:
+The agent must submit a Devnet transaction with both a system transfer of at least the quoted amount to the recipient and a Memo program instruction containing the quote nonce. It then retries:
 
 ```http
 GET /api/v1/deaddrop/intel HTTP/1.1
@@ -138,11 +137,11 @@ Host: localhost:4020
 payment-signature: <solana-transaction-signature>
 ```
 
-The demo returns the protected data when it finds a transaction for that signature.
+The server rejects malformed or reused signatures, failed or unavailable transactions, payments older than five minutes, missing or expired quote memos, recipient/amount mismatches, and insufficient recipient balance increases.
 
 ### `GET /api/v1/logs`
 
-Returns the latest server-side protocol events and the server's public key. The dashboard uses this endpoint; the event log is held in memory and is not persistent.
+Returns the recent in-memory event feed and the server public key. The dashboard polls this endpoint once per second.
 
 ## Tech stack
 
@@ -155,16 +154,25 @@ Returns the latest server-side protocol events and the server's public key. The 
 
 ## Roadmap
 
+- [ ] Persist used signatures and quote state so replay protection survives server restarts.
+- [ ] Add SPL token payments, including USDC.
+- [ ] Support multi-agent data bidding and offer selection.
 - [ ] Add configurable, dynamic pricing models.
-- [ ] Support SPL tokens, including USDC, in addition to native SOL.
-- [ ] Enable multi-agent data bidding and offer selection.
-- [ ] Persist settlement records and enforce replay protection.
-- [ ] Validate transaction success, payer, recipient, and exact payment amount before releasing data.
+- [ ] Harden and independently audit transaction verification before any production use.
 
 ## Prototype limitations
 
-This project is an educational hackathon demo. **Do not use it to protect valuable data or accept real payments.** The current server checks that a transaction can be looked up, but does not verify that it succeeded or that it paid the required amount to the expected recipient. It also does not prevent reusing a transaction signature. The event feed is in-memory, and the demo wallets are stored as plaintext JSON files.
+DeadDrop402 is an educational prototype. **Do not use it to protect valuable data or accept real payments.**
+
+- **Devnet only:** The RPC endpoint and payment flow target Solana Devnet.
+- **SOL only:** Payments use native SOL; SPL tokens and USDC are not supported.
+- **In-memory state:** Used signatures, quote nonces, and dashboard logs are lost when the server restarts.
+- **Price fallback:** If CoinGecko is unavailable or times out after three seconds, the payload uses a fallback SOL/USD value of `$142.50`.
+- **TPS availability:** TPS is derived from recent Devnet performance samples; it is `0` if the RPC returns no samples.
+- **Liquidity depth:** Not integrated; the payload reports `Not available`.
+- **Demo wallets:** Keypairs are stored in plaintext JSON files. Use throwaway Devnet wallets only.
+- **Not audited:** Transaction parsing, RPC availability, and the overall payment protocol need additional hardening and review before production use.
 
 ## License
 
-No license is currently specified. Until a license is added, the project is not explicitly licensed for reuse or redistribution.
+This project is licensed under the [MIT License](./LICENSE).
