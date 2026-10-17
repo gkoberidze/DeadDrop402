@@ -17,9 +17,11 @@ const connection = new Connection("https://api.devnet.solana.com", "confirmed");
 
 // Load keys or fallback gracefully
 let SERVER_PUBKEY = "Generate via npm run setup";
+let serverKeypair: Keypair | null = null;
 if (fs.existsSync("server-key.json")) {
   const secret = JSON.parse(fs.readFileSync("server-key.json", "utf-8"));
-  SERVER_PUBKEY = Keypair.fromSecretKey(Uint8Array.from(secret)).publicKey.toBase58();
+  serverKeypair = Keypair.fromSecretKey(Uint8Array.from(secret));
+  SERVER_PUBKEY = serverKeypair.publicKey.toBase58();
 }
 
 // In-memory event log for the Web Dashboard UI
@@ -30,6 +32,9 @@ function logEvent(type: string, details: any) {
   eventLogs.unshift(log);
   if (eventLogs.length > 20) eventLogs.pop();
 }
+
+// Track used signatures to prevent Replay Attacks
+const usedSignatures = new Set<string>();
 
 // Protected Ephemeral Secret Payload
 const DEAD_DROP_VAULT = {
@@ -42,6 +47,7 @@ const DEAD_DROP_VAULT = {
 // Main HTTP 402 Protected Endpoint
 app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
   const paymentSignature = req.headers["payment-signature"] as string;
+  const REQUIRED_LAMPORTS = 1000000; // 0.001 SOL
 
   // 1. Throw HTTP 402 if no payment header
   if (!paymentSignature) {
@@ -53,31 +59,67 @@ app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
       paymentDetails: {
         network: "solana-devnet",
         recipient: SERVER_PUBKEY,
-        amountLamports: 1000000, // 0.001 SOL
+        amountLamports: REQUIRED_LAMPORTS,
         asset: "SOL",
       },
     });
   }
 
-  // 2. Validate on-chain signature
+  // 2. Prevent Replay Attacks (Check if signature was already spent)
+  if (usedSignatures.has(paymentSignature)) {
+    logEvent("REPLAY_ATTACK_BLOCKED", { signature: paymentSignature });
+    return res.status(400).json({ error: "Replay attack detected: Signature has already been used." });
+  }
+
+  // 3. Validate on-chain transaction thoroughly
   try {
     logEvent("VERIFYING_TX", { signature: paymentSignature });
-    const tx = await connection.getTransaction(paymentSignature, {
+    const tx = await connection.getParsedTransaction(paymentSignature, {
       maxSupportedTransactionVersion: 0,
     });
 
-    if (!tx) {
-      logEvent("VERIFY_FAILED", { reason: "Transaction unconfirmed or invalid." });
-      return res.status(400).json({ error: "Invalid transaction signature." });
+    // Check if transaction exists and did not fail on-chain
+    if (!tx || tx.meta?.err !== null) {
+      logEvent("VERIFY_FAILED", { reason: "Transaction unconfirmed, failed, or invalid." });
+      return res.status(400).json({ error: "Invalid or failed transaction signature." });
     }
 
-    logEvent("PAYLOAD_UNLOCKED", { dropId: DEAD_DROP_VAULT.id, recipient: SERVER_PUBKEY });
+    // Ensure we know the server pubkey for validation
+    if (!serverKeypair) {
+      return res.status(500).json({ error: "Server wallet key not configured." });
+    }
+
+    // Verify recipient and transferred lamport amount
+    const accountKeys = tx.transaction.message.accountKeys;
+    const recipientIndex = accountKeys.findIndex(
+      (acc) => acc.pubkey.toBase58() === SERVER_PUBKEY
+    );
+
+    if (recipientIndex === -1 || !tx.meta) {
+      logEvent("VERIFY_FAILED", { reason: "Recipient not found in transaction instructions." });
+      return res.status(400).json({ error: "Payment recipient mismatch." });
+    }
+
+    const preBalance = tx.meta.preBalances[recipientIndex];
+    const postBalance = tx.meta.postBalances[recipientIndex];
+    const diff = postBalance - preBalance;
+
+    if (diff < REQUIRED_LAMPORTS) {
+      logEvent("VERIFY_FAILED", { reason: `Insufficient funds transferred. Expected ${REQUIRED_LAMPORTS}, got ${diff}` });
+      return res.status(400).json({ error: "Insufficient payment amount." });
+    }
+
+    // Mark signature as used to block subsequent replay attempts
+    usedSignatures.add(paymentSignature);
+
+    logEvent("PAYLOAD_UNLOCKED", { dropId: DEAD_DROP_VAULT.id, recipient: SERVER_PUBKEY, signature: paymentSignature });
     return res.status(200).json({
       status: "UNLOCKED",
       protocol: "x402",
       data: DEAD_DROP_VAULT,
     });
   } catch (err: any) {
+    logEvent("VERIFY_ERROR", { message: err.message });
     return res.status(500).json({ error: "Verification failed.", details: err.message });
   }
 });
