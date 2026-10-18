@@ -7,7 +7,8 @@
   "scripts": {
     "setup": "ts-node setup-wallets.ts",
     "server": "ts-node server.ts",
-    "client": "ts-node client.ts"
+    "client": "ts-node client.ts",
+    "swarm": "ts-node client.ts --swarm"
   },
   "dependencies": {
     "@solana/web3.js": "^1.95.3",

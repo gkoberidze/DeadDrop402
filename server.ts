@@ -38,21 +38,42 @@ if (fs.existsSync("server-key.json")) {
 }
 
 // In-memory event log for the Web Dashboard UI
-let eventLogs: Array<{ time: string; type: string; details: any }> = [];
+let eventLogs: Array<{ time: string; type: string; details: Record<string, unknown> }> = [];
+let totalPurchases = 0;
+let totalLamportsPaid = 0;
+const knownAgents = new Set<string>();
 
-function logEvent(type: string, details: any) {
+function logEvent(type: string, details: Record<string, unknown>) {
   const log = { time: new Date().toLocaleTimeString(), type, details };
   eventLogs.unshift(log);
-  if (eventLogs.length > 20) eventLogs.pop();
+  if (eventLogs.length > 50) eventLogs.pop();
+
+  if (type === "PAYLOAD_UNLOCKED") {
+    totalPurchases += 1;
+    if (typeof details.amountLamports === "number") {
+      totalLamportsPaid += details.amountLamports;
+    }
+    if (typeof details.agent === "string") {
+      knownAgents.add(details.agent);
+    }
+  }
 }
 
 // Signatures are reserved synchronously while verification is in progress.
 const usedSignatures = new Set<string>();
 const paymentQuotes = new Map<string, {
   expiresAt: number;
+  agent: string;
   reservedBy?: string;
   consumed?: boolean;
 }>();
+
+function getAgentName(value: string | string[] | undefined): string {
+  if (typeof value !== "string" || !/^[a-zA-Z0-9 _-]{1,32}$/.test(value)) {
+    return "Unknown Agent";
+  }
+  return value;
+}
 
 async function fetchSolUsdPrice(): Promise<number> {
   const controller = new AbortController();
@@ -118,6 +139,7 @@ async function getDeadDropVault() {
 // Main HTTP 402 Protected Endpoint
 app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
   const paymentSignature = req.headers["payment-signature"];
+  const agentName = getAgentName(req.headers["x-agent-name"]);
 
   // 1. Throw HTTP 402 if no payment header
   if (!paymentSignature) {
@@ -126,8 +148,16 @@ app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
       if (quote.expiresAt <= now) paymentQuotes.delete(nonce);
     }
     const memo = randomBytes(16).toString("hex");
-    paymentQuotes.set(memo, { expiresAt: now + PAYMENT_MAX_AGE_SECONDS * 1000 });
-    logEvent("HTTP_402_INTERCEPT", { status: "402 Payment Required", recipient: SERVER_PUBKEY });
+    paymentQuotes.set(memo, {
+      expiresAt: now + PAYMENT_MAX_AGE_SECONDS * 1000,
+      agent: agentName,
+    });
+    logEvent("HTTP_402_INTERCEPT", {
+      agent: agentName,
+      status: "402 Payment Required",
+      recipient: SERVER_PUBKEY,
+      amountLamports: REQUIRED_LAMPORTS,
+    });
     return res.status(402).json({
       error: "402 Payment Required",
       protocol: "x402-solana-v2",
@@ -150,7 +180,10 @@ app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
 
   // 2. Prevent Replay Attacks (Check if signature was already spent)
   if (usedSignatures.has(paymentSignature)) {
-    logEvent("REPLAY_ATTACK_BLOCKED", { signature: paymentSignature.slice(0, 100) });
+    logEvent("REPLAY_ATTACK_BLOCKED", {
+      agent: agentName,
+      signature: paymentSignature.slice(0, 100),
+    });
     return res.status(400).json({ error: "Replay attack detected: Signature has already been used." });
   }
   usedSignatures.add(paymentSignature);
@@ -158,30 +191,36 @@ app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
   // 3. Validate on-chain transaction thoroughly
   let verified = false;
   let reservedMemo: string | undefined;
+  const logVerificationFailure = (reason: string) => {
+    logEvent("VERIFY_FAILED", { agent: agentName, reason });
+  };
   try {
-    logEvent("VERIFYING_TX", { signature: paymentSignature.slice(0, 100) });
+    logEvent("VERIFYING_TX", {
+      agent: agentName,
+      signature: paymentSignature.slice(0, 100),
+    });
     const tx = await connection.getParsedTransaction(paymentSignature, {
       maxSupportedTransactionVersion: 0,
     });
 
     if (!tx) {
-      logEvent("VERIFY_FAILED", { reason: "Transaction not found or not confirmed." });
+      logVerificationFailure("Transaction not found or not confirmed.");
       return res.status(400).json({ error: "Transaction not found or not confirmed." });
     }
     if (tx.meta && tx.meta.err !== null) {
-      logEvent("VERIFY_FAILED", { reason: "Transaction failed on-chain." });
+      logVerificationFailure("Transaction failed on-chain.");
       return res.status(400).json({ error: "Transaction failed on-chain." });
     }
     if (!tx.meta) {
-      logEvent("VERIFY_FAILED", { reason: "Transaction metadata is unavailable." });
+      logVerificationFailure("Transaction metadata is unavailable.");
       return res.status(400).json({ error: "Transaction metadata is unavailable." });
     }
     if (tx.blockTime == null) {
-      logEvent("VERIFY_FAILED", { reason: "Transaction block time is unavailable." });
+      logVerificationFailure("Transaction block time is unavailable.");
       return res.status(400).json({ error: "Transaction block time is unavailable." });
     }
     if (Date.now() / 1000 - tx.blockTime > PAYMENT_MAX_AGE_SECONDS) {
-      logEvent("VERIFY_FAILED", { reason: "Transaction is older than five minutes." });
+      logVerificationFailure("Transaction is older than five minutes.");
       return res.status(400).json({ error: "Payment transaction is older than five minutes." });
     }
 
@@ -200,22 +239,26 @@ app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
     );
 
     if (!memoInstruction || !("parsed" in memoInstruction) || typeof memoInstruction.parsed !== "string") {
-      logEvent("VERIFY_FAILED", { reason: "No parsed memo instruction in transaction." });
+      logVerificationFailure("No parsed memo instruction in transaction.");
       return res.status(400).json({ error: "Payment transaction is missing a valid Memo program instruction." });
     }
 
     const memo = memoInstruction.parsed;
     const quote = paymentQuotes.get(memo);
     if (!quote) {
+      logVerificationFailure("Payment quote is unknown or has expired.");
       return res.status(400).json({ error: "Payment quote is unknown or has expired." });
     }
     if (quote.expiresAt <= Date.now()) {
+      logVerificationFailure("Payment quote has expired.");
       return res.status(400).json({ error: "Payment quote has expired." });
     }
     if (quote.consumed) {
+      logVerificationFailure("Payment quote has already been used.");
       return res.status(400).json({ error: "Payment quote has already been used." });
     }
     if (quote.reservedBy && quote.reservedBy !== paymentSignature) {
+      logVerificationFailure("Payment quote has already been used.");
       return res.status(400).json({ error: "Payment quote has already been used." });
     }
     quote.reservedBy = paymentSignature;
@@ -246,21 +289,21 @@ app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
     });
 
     if (systemTransfers.length === 0) {
-      logEvent("VERIFY_FAILED", { reason: "No parsed system transfer instruction." });
+      logVerificationFailure("No parsed system transfer instruction.");
       return res.status(400).json({ error: "Payment transaction contains no system transfer instruction." });
     }
     const recipientTransfers = systemTransfers.filter(
       (transfer) => transfer.destination === SERVER_PUBKEY,
     );
     if (recipientTransfers.length === 0) {
-      logEvent("VERIFY_FAILED", { reason: "System transfer destination does not match server wallet." });
+      logVerificationFailure("System transfer destination does not match server wallet.");
       return res.status(400).json({ error: "Payment transfer recipient does not match the server wallet." });
     }
     const qualifyingTransfer = recipientTransfers.find(
       (transfer) => transfer.lamports >= REQUIRED_LAMPORTS,
     );
     if (!qualifyingTransfer) {
-      logEvent("VERIFY_FAILED", { reason: "Server-directed transfer is below the required amount." });
+      logVerificationFailure("Server-directed transfer is below the required amount.");
       return res.status(400).json({
         error: "Server-directed transfer is below the required amount of 0.001 SOL.",
       });
@@ -271,28 +314,29 @@ app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
       (account) => account.pubkey.toBase58() === SERVER_PUBKEY,
     );
     if (recipientIndex === -1) {
-      logEvent("VERIFY_FAILED", { reason: "Server wallet is not present in transaction account keys." });
+      logVerificationFailure("Server wallet is not present in transaction account keys.");
       return res.status(400).json({ error: "Payment recipient balance could not be verified." });
     }
 
     const diff = tx.meta.postBalances[recipientIndex] - tx.meta.preBalances[recipientIndex];
     if (diff < REQUIRED_LAMPORTS) {
-      logEvent("VERIFY_FAILED", {
-        reason: `Insufficient recipient balance increase. Expected ${REQUIRED_LAMPORTS}, got ${diff}.`,
-      });
+      logVerificationFailure(`Insufficient recipient balance increase. Expected ${REQUIRED_LAMPORTS}, got ${diff}.`);
       return res.status(400).json({ error: "Insufficient payment amount." });
     }
 
     const unlockedPayload = await getDeadDropVault();
     if (quote.expiresAt <= Date.now()) {
+      logVerificationFailure("Payment quote expired before payload unlock.");
       return res.status(400).json({ error: "Payment quote expired before the payload could be unlocked." });
     }
     quote.consumed = true;
     delete quote.reservedBy;
     verified = true;
     logEvent("PAYLOAD_UNLOCKED", {
+      agent: quote.agent,
       dropId: unlockedPayload.id,
       recipient: SERVER_PUBKEY,
+      amountLamports: qualifyingTransfer.lamports,
       signature: paymentSignature.slice(0, 100),
     });
     return res.status(200).json({
@@ -302,7 +346,7 @@ app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown verification error";
-    logEvent("VERIFY_ERROR", { message });
+    logEvent("VERIFY_ERROR", { agent: agentName, message });
     return res.status(500).json({ error: "Payment verification failed.", details: message });
   } finally {
     if (!verified) {
@@ -317,11 +361,22 @@ app.get("/api/v1/deaddrop/intel", async (req: Request, res: Response) => {
 
 // Endpoint for Web UI live feeds
 app.get("/api/v1/logs", (req: Request, res: Response) => {
-  res.json({ logs: eventLogs, serverPubkey: SERVER_PUBKEY });
+  res.json({
+    logs: eventLogs,
+    serverPubkey: SERVER_PUBKEY,
+    stats: {
+      totalPurchases,
+      totalLamportsPaid,
+      uniqueAgents: knownAgents.size,
+      agents: Array.from(knownAgents),
+    },
+  });
 });
 
-app.listen(4020, () => {
+const port = Number(process.env.PORT ?? 4020);
+
+app.listen(port, () => {
   console.log("==================================================");
-  console.log("🔒 DeadDrop402 Server online: http://localhost:4020");
+  console.log(`🔒 DeadDrop402 Server online: http://localhost:${port}`);
   console.log("==================================================");
 });

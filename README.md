@@ -35,7 +35,8 @@ The current quote is **0.001 SOL** (`1,000,000` lamports) and expires after five
 - **Quote binding** — A random, expiring memo nonce binds the payment to the issued quote and is consumed after successful unlock.
 - **Replay protection** — Signatures are reserved before asynchronous verification, rejected if already in use, and retained after successful unlock. Failed verification releases the reservation for a legitimate retry.
 - **Fresh payments** — Transactions older than five minutes are rejected.
-- **Live dashboard** — Displays the server wallet and recent protocol events at `http://localhost:4020`.
+- **Multi-agent swarm demo** — Three autonomous buyer profiles evaluate the same fixed-price offer against different budgets and make sequential real Devnet purchases using the configured demo wallet.
+- **Live dashboard** — Shows successful unlocks, confirmed payment volume, served agent profiles, server wallet, and a live protocol event feed at `http://localhost:4020`.
 - **XSS-safe log rendering** — Dashboard event values are assigned through DOM `textContent`, not inserted as HTML.
 - **Live payload metrics** — SOL/USD is fetched from CoinGecko with a three-second timeout and fallback; TPS is calculated from Solana Devnet performance samples.
 - **No fabricated liquidity metric** — Liquidity depth is explicitly reported as unavailable until a real data source is integrated.
@@ -82,7 +83,7 @@ npm install
 npm run setup
 ```
 
-This creates `server-key.json` and `agent-key.json` in the project root and prints the agent's public address. Request **Devnet SOL** for that address from the [Solana Faucet](https://faucet.solana.com/). The agent needs enough for the 0.001 SOL payment and transaction fees.
+This creates `server-key.json` and `agent-key.json` in the project root and prints the agent's public address. Request **Devnet SOL** for that address from the [Solana Faucet](https://faucet.solana.com/). A single purchase needs slightly more than 0.001 SOL for the payment and transaction fees. The three-agent swarm makes three real purchases, so fund the demo wallet with at least 0.004 SOL first.
 
 > **Wallet safety:** These files contain private keys in plaintext. Keep them local, do not share or commit them, and use throwaway wallets with no real funds.
 
@@ -106,7 +107,13 @@ To demonstrate replay protection after a successful unlock:
 npm run client -- --replay
 ```
 
-The client resubmits the same signature and reports the server's rejection. Open **[http://localhost:4020](http://localhost:4020)** to watch the event dashboard.
+To run the three-profile autonomous buying demo:
+
+```bash
+npm run swarm
+```
+
+The profiles (`MarketScout`, `ChainWatcher`, and `RiskAnalyst`) run sequentially, each requesting a fresh quote, checking its own budget, paying on Devnet, and unlocking the protected intel. This demonstrates independent agent policies—not a bidding market—and the profiles share the same throwaway payer wallet. Open **[http://localhost:4020](http://localhost:4020)** to watch purchase totals, volume, agent status, and protocol events update live.
 
 ## API reference
 
@@ -137,11 +144,13 @@ Host: localhost:4020
 payment-signature: <solana-transaction-signature>
 ```
 
+The client optionally sends `x-agent-name` so the dashboard can label each buyer profile. It is a display label, not an authenticated identity.
+
 The server rejects malformed or reused signatures, failed or unavailable transactions, payments older than five minutes, missing or expired quote memos, recipient/amount mismatches, and insufficient recipient balance increases.
 
 ### `GET /api/v1/logs`
 
-Returns the recent in-memory event feed and the server public key. The dashboard polls this endpoint once per second.
+Returns the recent in-memory event feed, server public key, and aggregate purchase statistics. The dashboard polls this endpoint every 1.5 seconds.
 
 ## Tech stack
 
@@ -156,6 +165,7 @@ Returns the recent in-memory event feed and the server public key. The dashboard
 
 - [ ] Persist used signatures and quote state so replay protection survives server restarts.
 - [ ] Add SPL token payments, including USDC.
+- [ ] Give each agent profile its own wallet and support independent funding.
 - [ ] Support multi-agent data bidding and offer selection.
 - [ ] Add configurable, dynamic pricing models.
 - [ ] Harden and independently audit transaction verification before any production use.

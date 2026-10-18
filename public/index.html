@@ -3,114 +3,211 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DeadDrop402</title>
+  <meta name="theme-color" content="#070b12" />
+  <title>DeadDrop402 | Agent Market</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      background:
+        radial-gradient(ellipse at 12% 0%, rgba(16, 185, 129, .13), transparent 34rem),
+        radial-gradient(ellipse at 95% 18%, rgba(6, 182, 212, .09), transparent 28rem),
+        #070b12;
+    }
+    .glass { background: rgba(13, 20, 29, .82); backdrop-filter: blur(16px); }
+    .grid-glow {
+      background-image: linear-gradient(rgba(148, 163, 184, .035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 163, 184, .035) 1px, transparent 1px);
+      background-size: 36px 36px;
+    }
+    .pulse-dot { box-shadow: 0 0 14px rgba(52, 211, 153, .85); }
+    .scrollbar::-webkit-scrollbar { width: 5px; }
+    .scrollbar::-webkit-scrollbar-thumb { background: #263344; border-radius: 10px; }
+  </style>
 </head>
-<body class="bg-slate-950 text-slate-100 font-mono min-h-screen p-8">
-  <div class="max-w-4xl mx-auto space-y-6">
-    
-    <!-- Header Card -->
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl flex justify-between items-center">
+<body class="grid-glow min-h-screen px-4 py-6 font-mono text-slate-100 sm:px-8 sm:py-10">
+  <main class="mx-auto max-w-6xl space-y-6">
+    <header class="glass flex flex-col justify-between gap-5 rounded-2xl border border-slate-800/90 p-6 shadow-2xl shadow-black/20 sm:flex-row sm:items-center sm:p-8">
       <div>
-        <h1 class="text-2xl font-bold tracking-tight text-emerald-400">DeadDrop402</h1>
-        <p class="text-sm text-slate-400">ავტონომიური M2M მონაცემთა ბაზა</p>
+        <div class="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.28em] text-emerald-400">
+          <span class="h-2 w-2 rounded-full bg-emerald-400 pulse-dot"></span>
+          Autonomous data exchange / Solana Devnet
+        </div>
+        <h1 class="text-3xl font-black tracking-tight sm:text-4xl">DeadDrop<span class="text-emerald-400">402</span></h1>
+        <p class="mt-2 max-w-xl text-sm leading-6 text-slate-400">Agents request. The server quotes. Solana settles. Data unlocks.</p>
       </div>
-      <div class="flex items-center space-x-2 bg-emerald-950/60 text-emerald-400 text-xs font-semibold px-3 py-1.5 rounded-full border border-emerald-800/60">
-        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span>SERVER ACTIVE</span>
+      <div class="flex items-center gap-3 self-start rounded-xl border border-emerald-900/70 bg-emerald-950/40 px-4 py-3 sm:self-auto">
+        <span class="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-400 pulse-dot"></span>
+        <div>
+          <div class="text-xs font-bold tracking-widest text-emerald-300">PROTOCOL ONLINE</div>
+          <div class="mt-1 text-[10px] text-slate-500">HTTP 402 · x402-solana-v2</div>
+        </div>
       </div>
-    </div>
+    </header>
 
-    <!-- Details Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
-        <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">Target Endpoint</span>
-        <code class="text-sm font-bold text-emerald-400 bg-slate-950 px-2 py-1 rounded border border-slate-800">GET /api/v1/deaddrop/intel</code>
-      </div>
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
-        <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">Recipient Wallet</span>
-        <code id="recipient-wallet" class="text-xs font-semibold text-slate-300 break-all">Loading...</code>
-      </div>
-    </div>
+    <section class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <article class="glass rounded-xl border border-slate-800 p-5">
+        <p class="text-[10px] font-bold uppercase tracking-[.2em] text-slate-500">Successful unlocks</p>
+        <p id="stat-purchases" class="mt-3 text-3xl font-black text-white">0</p>
+        <p class="mt-1 text-xs text-slate-500">Verified data purchases</p>
+      </article>
+      <article class="glass rounded-xl border border-slate-800 p-5">
+        <p class="text-[10px] font-bold uppercase tracking-[.2em] text-slate-500">Volume settled</p>
+        <p id="stat-volume" class="mt-3 text-3xl font-black text-cyan-300">0.000 SOL</p>
+        <p class="mt-1 text-xs text-slate-500">Confirmed on Solana Devnet</p>
+      </article>
+      <article class="glass rounded-xl border border-slate-800 p-5">
+        <p class="text-[10px] font-bold uppercase tracking-[.2em] text-slate-500">Agents served</p>
+        <p id="stat-agents" class="mt-3 text-3xl font-black text-emerald-300">0</p>
+        <p class="mt-1 text-xs text-slate-500">Distinct buyer profiles</p>
+      </article>
+      <article class="glass rounded-xl border border-slate-800 p-5">
+        <p class="text-[10px] font-bold uppercase tracking-[.2em] text-slate-500">Price per unlock</p>
+        <p class="mt-3 text-3xl font-black text-amber-300">0.001 SOL</p>
+        <p class="mt-1 text-xs text-slate-500">Quote expires in 5 minutes</p>
+      </article>
+    </section>
 
-    <!-- Live Protocol Events Monitor -->
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-base font-bold text-slate-200 tracking-wide uppercase">Live Protocol Events</h2>
-        <span class="text-xs text-slate-500">Polling every 1s</span>
+    <section class="grid gap-6 lg:grid-cols-[.85fr_1.5fr]">
+      <div class="glass rounded-2xl border border-slate-800 p-5 sm:p-6">
+        <div class="mb-5 flex items-center justify-between">
+          <div>
+            <p class="text-[10px] font-bold uppercase tracking-[.22em] text-emerald-400">Buyer network</p>
+            <h2 class="mt-1 text-lg font-bold">Autonomous agents</h2>
+          </div>
+          <span id="agent-count" class="rounded-full border border-slate-700 px-2.5 py-1 text-[10px] text-slate-400">0 connected</span>
+        </div>
+        <div id="agents-container" class="space-y-3"></div>
+        <div class="mt-5 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+          <p class="text-[10px] font-bold uppercase tracking-[.18em] text-slate-500">Payment recipient</p>
+          <code id="recipient-wallet" class="mt-2 block break-all text-[11px] leading-5 text-cyan-300">Loading wallet...</code>
+        </div>
       </div>
-      <div id="logs-container" class="space-y-3 min-h-[200px]">
-        <div class="text-sm text-slate-500 italic">Waiting for agent requests...</div>
-      </div>
-    </div>
 
-  </div>
+      <div class="glass min-w-0 rounded-2xl border border-slate-800 p-5 sm:p-6">
+        <div class="mb-5 flex items-center justify-between gap-3">
+          <div>
+            <p class="text-[10px] font-bold uppercase tracking-[.22em] text-cyan-400">On-chain activity</p>
+            <h2 class="mt-1 text-lg font-bold">Live protocol feed</h2>
+          </div>
+          <span class="flex shrink-0 items-center gap-2 text-[10px] text-slate-500">
+            <span class="h-1.5 w-1.5 rounded-full bg-cyan-400"></span>
+            AUTO-REFRESH
+          </span>
+        </div>
+        <div id="logs-container" class="scrollbar max-h-[440px] min-h-[230px] space-y-3 overflow-y-auto pr-1">
+          <div class="rounded-xl border border-dashed border-slate-800 p-8 text-center text-xs text-slate-500">Waiting for agent requests...</div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="flex flex-col justify-between gap-2 px-1 text-[10px] text-slate-600 sm:flex-row">
+      <span>DeadDrop402 · Payment-gated APIs for autonomous agents</span>
+      <span>Devnet prototype · Demo agent profiles share one throwaway payer wallet</span>
+    </footer>
+  </main>
 
   <script>
-    const badgeClasses = {
-      HTTP_402_INTERCEPT: "bg-amber-950/60 text-amber-400 border-amber-800/60",
-      VERIFYING_TX: "bg-blue-950/60 text-blue-400 border-blue-800/60",
-      PAYLOAD_UNLOCKED: "bg-emerald-950/60 text-emerald-400 border-emerald-800/60",
+    const agentProfiles = ["MarketScout", "ChainWatcher", "RiskAnalyst", "BioByte-Autonomous-Agent-01"];
+    const badgeStyles = {
+      HTTP_402_INTERCEPT: "border-amber-800/60 bg-amber-950/50 text-amber-300",
+      VERIFYING_TX: "border-cyan-800/60 bg-cyan-950/50 text-cyan-300",
+      PAYLOAD_UNLOCKED: "border-emerald-800/60 bg-emerald-950/50 text-emerald-300",
+      REPLAY_ATTACK_BLOCKED: "border-rose-800/60 bg-rose-950/50 text-rose-300",
+      VERIFY_FAILED: "border-rose-800/60 bg-rose-950/50 text-rose-300",
+      VERIFY_ERROR: "border-rose-800/60 bg-rose-950/50 text-rose-300"
     };
 
-    function showEmptyState(container) {
-      const message = document.createElement("div");
-      message.className = "text-sm text-slate-500 italic";
-      message.textContent = "Waiting for agent requests...";
-      container.replaceChildren(message);
+    function makeElement(tag, className, text) {
+      const element = document.createElement(tag);
+      element.className = className;
+      if (text !== undefined) element.textContent = String(text);
+      return element;
     }
 
-    async function fetchLogs() {
+    function renderAgents(logs, knownAgents) {
+      const latestByAgent = new Map();
+      logs.forEach((log) => {
+        const details = log && typeof log.details === "object" && log.details !== null ? log.details : {};
+        if (typeof details.agent === "string" && !latestByAgent.has(details.agent)) {
+          latestByAgent.set(details.agent, log.type);
+        }
+      });
+
+      const allAgents = [...new Set([...agentProfiles, ...knownAgents])];
+      const container = document.getElementById("agents-container");
+      const cards = allAgents.map((name) => {
+        const lastEvent = latestByAgent.get(name);
+        const isPaid = lastEvent === "PAYLOAD_UNLOCKED";
+        const isActive = lastEvent === "HTTP_402_INTERCEPT" || lastEvent === "VERIFYING_TX";
+        const status = isPaid ? "PURCHASED" : isActive ? "ACTIVE" : "READY";
+        const color = isPaid ? "text-emerald-300" : isActive ? "text-cyan-300" : "text-slate-500";
+        const card = makeElement("div", "flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/55 px-4 py-3");
+        const identity = makeElement("div", "flex min-w-0 items-center gap-3");
+        const avatar = makeElement("span", "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-xs font-black text-emerald-300", name.slice(0, 1).toUpperCase());
+        const label = makeElement("span", "truncate text-xs font-semibold text-slate-200", name);
+        identity.append(avatar, label);
+        const state = makeElement("span", `ml-2 shrink-0 text-[9px] font-bold tracking-widest ${color}`, status);
+        card.append(identity, state);
+        return card;
+      });
+      container.replaceChildren(...cards);
+      document.getElementById("agent-count").textContent = `${knownAgents.length} served`;
+    }
+
+    function renderLogs(logs) {
+      const container = document.getElementById("logs-container");
+      if (!Array.isArray(logs) || logs.length === 0) {
+        const empty = makeElement("div", "rounded-xl border border-dashed border-slate-800 p-8 text-center text-xs text-slate-500", "Waiting for agent requests...");
+        container.replaceChildren(empty);
+        return;
+      }
+
+      const rows = logs.slice(0, 30).map((log) => {
+        const detailsValue = log && typeof log.details === "object" && log.details !== null ? log.details : {};
+        const row = makeElement("article", "rounded-xl border border-slate-800 bg-slate-950/65 p-4");
+        const top = makeElement("div", "flex flex-wrap items-center justify-between gap-2");
+        const identity = makeElement("div", "flex min-w-0 items-center gap-2");
+        const agent = makeElement("span", "truncate text-xs font-bold text-slate-200", detailsValue.agent || "Protocol");
+        const badgeClass = Object.prototype.hasOwnProperty.call(badgeStyles, log.type)
+          ? badgeStyles[log.type]
+          : "border-slate-700 bg-slate-900 text-slate-400";
+        const badge = makeElement("span", `rounded-md border px-2 py-1 text-[9px] font-bold tracking-wider ${badgeClass}`, log.type || "EVENT");
+        identity.append(agent, badge);
+        const time = makeElement("time", "text-[10px] text-slate-600", log.time || "");
+        top.append(identity, time);
+        const detail = makeElement("pre", "mt-3 overflow-x-auto whitespace-pre-wrap break-words text-[10px] leading-5 text-slate-500", JSON.stringify(detailsValue, null, 2));
+        row.append(top, detail);
+        return row;
+      });
+      container.replaceChildren(...rows);
+    }
+
+    async function refreshDashboard() {
       try {
-        const res = await fetch('/api/v1/logs');
-        if (!res.ok) throw new Error(`Log request failed with HTTP ${res.status}`);
-        const data = await res.json();
-        
+        const response = await fetch("/api/v1/logs", { cache: "no-store" });
+        if (!response.ok) throw new Error(`Dashboard request failed (HTTP ${response.status})`);
+        const data = await response.json();
+        if (!data || typeof data !== "object") throw new Error("Invalid dashboard response");
+
         if (typeof data.serverPubkey === "string") {
-          document.getElementById('recipient-wallet').textContent = data.serverPubkey;
+          document.getElementById("recipient-wallet").textContent = data.serverPubkey;
         }
-
-        const container = document.getElementById('logs-container');
-        if (!Array.isArray(data.logs) || data.logs.length === 0) {
-          showEmptyState(container);
-          return;
-        }
-
-        const entries = data.logs.map(log => {
-          const row = document.createElement("div");
-          row.className = "p-3.5 bg-slate-950 border border-slate-800 rounded-lg flex items-start justify-between text-xs space-x-3";
-
-          const heading = document.createElement("div");
-          heading.className = "flex items-center space-x-2";
-
-          const time = document.createElement("span");
-          time.className = "text-slate-500 font-semibold";
-          time.textContent = `[${String(log.time ?? "")}]`;
-
-          const type = document.createElement("span");
-          const eventType = String(log.type ?? "");
-          const badgeClass = Object.prototype.hasOwnProperty.call(badgeClasses, eventType)
-            ? badgeClasses[eventType]
-            : "bg-slate-800 text-slate-300 border-slate-700";
-          type.className = `font-bold px-2 py-0.5 rounded border ${badgeClass}`;
-          type.textContent = eventType;
-          heading.append(time, type);
-
-          const details = document.createElement("pre");
-          details.className = "text-slate-400 font-mono text-right overflow-x-auto max-w-md";
-          details.textContent = JSON.stringify(log.details ?? null);
-
-          row.append(heading, details);
-          return row;
-        });
-        container.replaceChildren(...entries);
-      } catch (e) {
-        console.error("Failed to fetch logs", e);
+        const stats = data.stats && typeof data.stats === "object" ? data.stats : {};
+        document.getElementById("stat-purchases").textContent = String(stats.totalPurchases || 0);
+        document.getElementById("stat-volume").textContent = `${((Number(stats.totalLamportsPaid) || 0) / 1e9).toFixed(3)} SOL`;
+        document.getElementById("stat-agents").textContent = String(stats.uniqueAgents || 0);
+        const logs = Array.isArray(data.logs) ? data.logs : [];
+        const agents = Array.isArray(stats.agents) ? stats.agents.filter((name) => typeof name === "string") : [];
+        renderAgents(logs, agents);
+        renderLogs(logs);
+      } catch (error) {
+        console.error("Failed to refresh dashboard", error);
       }
     }
 
-    setInterval(fetchLogs, 1000);
-    fetchLogs();
+    refreshDashboard();
+    setInterval(refreshDashboard, 1500);
   </script>
 </body>
 </html>

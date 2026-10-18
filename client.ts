@@ -13,124 +13,172 @@ import process from "node:process";
 const connection = new Connection("https://api.devnet.solana.com", "confirmed");
 const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 const replayDemoEnabled = process.argv.includes("--replay");
+const swarmDemoEnabled = process.argv.includes("--swarm");
 
-// Load Agent Wallet
-if (!fs.existsSync("agent-key.json")) {
-  console.error("❌ Agent key missing! Run `npm run setup` first.");
-  process.exit(1);
-}
-
-const secret = JSON.parse(fs.readFileSync("agent-key.json", "utf-8"));
-const agentKeypair = Keypair.fromSecretKey(Uint8Array.from(secret));
-
-// Autonomous Agent Configuration & State
-const AGENT_CONFIG = {
+const singleAgent = {
   name: "BioByte-Autonomous-Agent-01",
-  maxBudgetLamports: 2000000, // Maximum budget: 0.002 SOL
+  maxBudgetLamports: 2_000_000,
 };
 
-async function runAutonomousAgent() {
-  console.log(`\n🤖 [AGENT INITIALIZATION] ${AGENT_CONFIG.name}`);
-  console.log(`💳 Wallet Public Key: ${agentKeypair.publicKey.toBase58()}`);
-  
-  const balance = await connection.getBalance(agentKeypair.publicKey);
-  console.log(`💰 Current Balance: ${balance / 1e9} SOL`);
+const swarmAgents = [
+  { name: "MarketScout", maxBudgetLamports: 1_500_000 },
+  { name: "ChainWatcher", maxBudgetLamports: 1_250_000 },
+  { name: "RiskAnalyst", maxBudgetLamports: 1_000_000 },
+];
 
+interface PaymentChallenge {
+  paymentDetails: {
+    network: string;
+    recipient: string;
+    amountLamports: number;
+    memo: string;
+  };
+}
+
+function isPaymentChallenge(value: unknown): value is PaymentChallenge {
+  if (typeof value !== "object" || value === null || !("paymentDetails" in value)) {
+    return false;
+  }
+  const details = value.paymentDetails;
+  return typeof details === "object" && details !== null &&
+    "network" in details && typeof details.network === "string" &&
+    "recipient" in details && typeof details.recipient === "string" &&
+    "amountLamports" in details && typeof details.amountLamports === "number" &&
+    "memo" in details && typeof details.memo === "string";
+}
+
+function loadAgentWallet(): Keypair {
+  if (!fs.existsSync("agent-key.json")) {
+    throw new Error("Agent key missing! Run `npm run setup` first.");
+  }
+  const secret: unknown = JSON.parse(fs.readFileSync("agent-key.json", "utf-8"));
+  if (!Array.isArray(secret) || !secret.every((byte) => Number.isInteger(byte))) {
+    throw new Error("agent-key.json is not a valid Solana keypair.");
+  }
+  return Keypair.fromSecretKey(Uint8Array.from(secret));
+}
+
+async function runAutonomousAgent(
+  agent: typeof singleAgent,
+  agentKeypair: Keypair,
+): Promise<boolean> {
   const targetUrl = "http://localhost:4020/api/v1/deaddrop/intel";
-  console.log(`\n🔍 Requesting Intel Endpoint: ${targetUrl}...`);
+  const agentHeaders = { "x-agent-name": agent.name };
 
-  let paymentDetails: any = null;
+  console.log(`\n🤖 [AGENT INITIALIZATION] ${agent.name}`);
+  console.log(`💳 Shared demo wallet: ${agentKeypair.publicKey.toBase58()}`);
 
-  // Step 1: Probe Endpoint for x402 Price Details
   try {
-    const res = await fetch(targetUrl);
-    if (res.status === 402) {
-      const data = await res.json();
-      console.log("\n⚡ [HTTP 402 INTERCEPTED] Payment Required Header Detected!");
-      paymentDetails = data.paymentDetails;
-      console.log(`   └─ Network: ${paymentDetails.network}`);
-      console.log(`   └─ Recipient: ${paymentDetails.recipient}`);
-      console.log(`   └─ Price: ${paymentDetails.amountLamports} Lamports (${paymentDetails.amountLamports / 1e9} SOL)`);
-      console.log(`   └─ Quote memo: ${paymentDetails.memo}`);
-    } else {
-      console.log("Unexpected response status:", res.status);
-      return;
+    const balance = await connection.getBalance(agentKeypair.publicKey);
+    console.log(`💰 Wallet balance: ${(balance / 1e9).toFixed(5)} SOL`);
+
+    console.log(`\n🔍 ${agent.name} requests protected intel...`);
+    const quoteResponse = await fetch(targetUrl, { headers: agentHeaders });
+    const quoteBody: unknown = await quoteResponse.json();
+    if (quoteResponse.status !== 402 || !isPaymentChallenge(quoteBody)) {
+      console.error(`❌ Expected an HTTP 402 quote, received HTTP ${quoteResponse.status}:`, quoteBody);
+      return false;
     }
-  } catch (error: any) {
-    console.error("❌ Unexpected Error Probing Endpoint:", error.message);
-    return;
-  }
 
-  // Step 2: Autonomous Decision Evaluation Loop
-  console.log("\n🧠 [AGENT EVALUATION LOOP] Analyzing deal parameters...");
-  const requestedPrice = paymentDetails.amountLamports;
+    const paymentDetails = quoteBody.paymentDetails;
+    console.log(`⚡ [HTTP 402] Quote received for ${paymentDetails.network}`);
+    console.log(`   └─ Price: ${(paymentDetails.amountLamports / 1e9).toFixed(3)} SOL`);
+    console.log(`   └─ Quote memo: ${paymentDetails.memo}`);
 
-  if (requestedPrice > AGENT_CONFIG.maxBudgetLamports) {
-    console.log(`❌ [DECISION: REJECTED] Price (${requestedPrice}) exceeds max budget threshold (${AGENT_CONFIG.maxBudgetLamports}). Transaction cancelled.`);
-    return;
-  }
+    if (paymentDetails.amountLamports > agent.maxBudgetLamports) {
+      console.log(`⛔ [${agent.name}] Declined: quote exceeds this agent's budget.`);
+      return false;
+    }
+    if (balance < paymentDetails.amountLamports + 10_000) {
+      console.log(`⛔ [${agent.name}] Declined: insufficient SOL for payment and network fees.`);
+      return false;
+    }
 
-  if (balance < requestedPrice) {
-    console.log(`❌ [DECISION: REJECTED] Insufficient wallet balance for execution.`);
-    return;
-  }
+    console.log(`✅ [${agent.name}] Approved within budget. Sending Devnet micropayment...`);
+    const transaction = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: agentKeypair.publicKey,
+        toPubkey: new PublicKey(paymentDetails.recipient),
+        lamports: paymentDetails.amountLamports,
+      }),
+      new TransactionInstruction({
+        keys: [],
+        programId: MEMO_PROGRAM_ID,
+        data: Buffer.from(paymentDetails.memo, "utf8"),
+      }),
+    );
 
-  console.log(`✅ [DECISION: APPROVED] Price is within budget (${requestedPrice} <= ${AGENT_CONFIG.maxBudgetLamports} Lamports). Executing M2M payment...`);
+    const signature = await sendAndConfirmTransaction(connection, transaction, [agentKeypair]);
+    console.log(`✅ Payment confirmed: ${signature}`);
 
-  // Step 3: Execute On-Chain Solana Payment
-  const recipientPubkey = new PublicKey(paymentDetails.recipient);
-  const transaction = new Transaction().add(
-    SystemProgram.transfer({
-      fromPubkey: agentKeypair.publicKey,
-      toPubkey: recipientPubkey,
-      lamports: requestedPrice,
-    }),
-    new TransactionInstruction({
-      keys: [],
-      programId: MEMO_PROGRAM_ID,
-      data: Buffer.from(paymentDetails.memo, "utf8"),
-    }),
-  );
-
-  console.log("🚀 Broadcasting transaction to Solana Devnet...");
-  const signature = await sendAndConfirmTransaction(connection, transaction, [agentKeypair]);
-  console.log(`🎉 Payment Confirmed! Tx Signature: ${signature}`);
-
-  // Step 4: Submit Payment Signature & Claim Unlocked Intel Payload
-  console.log("\n🔓 Submitting Proof of Payment to Unlock Vault...");
-  try {
-    const res = await fetch(targetUrl, {
+    const unlockResponse = await fetch(targetUrl, {
       method: "GET",
       headers: {
+        ...agentHeaders,
         "payment-signature": signature,
       },
     });
-
-    const responseBody: unknown = await res.json();
-    if (!res.ok) {
-      console.error(`❌ Unlock request failed (HTTP ${res.status}):`, responseBody);
-      return;
+    const unlockBody: unknown = await unlockResponse.json();
+    if (!unlockResponse.ok) {
+      console.error(`❌ [${agent.name}] Unlock failed (HTTP ${unlockResponse.status}):`, unlockBody);
+      return false;
     }
 
-    console.log("\n✨ ================= DATA UNLOCKED ================= ✨");
-    console.dir(responseBody, { depth: null, colors: true });
-    console.log("========================================================\n");
+    console.log(`\n🔓 [${agent.name}] DATA UNLOCKED`);
+    console.dir(unlockBody, { depth: null, colors: true });
 
     if (replayDemoEnabled) {
-      console.log("🔁 [REPLAY DEMO] Resubmitting the same payment signature...");
+      console.log(`\n🔁 [${agent.name}] Replay demo: resending the same signature...`);
       const replayResponse = await fetch(targetUrl, {
-        headers: { "payment-signature": signature },
+        headers: {
+          ...agentHeaders,
+          "payment-signature": signature,
+        },
       });
       const replayBody: unknown = await replayResponse.json();
-      if (!replayResponse.ok) {
-        console.log(`✅ Server rejected the replay (HTTP ${replayResponse.status}):`, replayBody);
+      if (replayResponse.status === 400) {
+        console.log(`✅ Replay rejected as expected (HTTP 400):`, replayBody);
       } else {
-        console.error("❌ Replay was unexpectedly accepted by the server.");
+        console.error(`❌ Unexpected replay response (HTTP ${replayResponse.status}):`, replayBody);
+        return false;
       }
     }
-  } catch (error: any) {
-    console.error("❌ Settlement Error:", error.message);
+
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown agent error";
+    console.error(`❌ [${agent.name}] Agent run failed: ${message}`);
+    return false;
   }
 }
 
-runAutonomousAgent();
+async function main() {
+  let agentKeypair: Keypair;
+  try {
+    agentKeypair = loadAgentWallet();
+  } catch (error) {
+    console.error(`❌ ${error instanceof Error ? error.message : "Could not load agent wallet."}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (swarmDemoEnabled) {
+    console.log("\n🛰️  DEADROP402 MULTI-AGENT BUYING DEMO");
+    console.log("Three autonomous buyer profiles will purchase sequentially.");
+    console.log("They share the configured throwaway Devnet agent wallet.");
+    let successfulPurchases = 0;
+    for (const agent of swarmAgents) {
+      if (await runAutonomousAgent(agent, agentKeypair)) {
+        successfulPurchases += 1;
+      }
+    }
+    console.log(`\n📊 Swarm complete: ${successfulPurchases}/${swarmAgents.length} successful purchases.`);
+    if (successfulPurchases !== swarmAgents.length) process.exitCode = 1;
+    return;
+  }
+
+  const success = await runAutonomousAgent(singleAgent, agentKeypair);
+  if (!success) process.exitCode = 1;
+}
+
+void main();
